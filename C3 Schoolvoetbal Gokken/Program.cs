@@ -41,17 +41,22 @@ class Program
         {
             connection.Open();
 
-            string createUsersTable = "CREATE TABLE IF NOT EXISTS Users (" +
-                                      "Id INT AUTO_INCREMENT PRIMARY KEY, " +
-                                      "Username VARCHAR(50) NOT NULL UNIQUE, " +
-                                      "Password VARCHAR(50) NOT NULL);";
+            string createUsersTable = @"
+                CREATE TABLE IF NOT EXISTS Users (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    Username VARCHAR(50) NOT NULL UNIQUE,
+                    Password VARCHAR(50) NOT NULL,
+                    Balance DECIMAL(10, 2) DEFAULT 50.00
+                );";
 
-            string createBetsTable = "CREATE TABLE IF NOT EXISTS Bets (" +
-                                     "Id INT AUTO_INCREMENT PRIMARY KEY, " +
-                                     "UserId INT, " +
-                                     "BetDescription VARCHAR(255), " +
-                                     "BetAmount DECIMAL(10, 2), " +
-                                     "FOREIGN KEY (UserId) REFERENCES Users(Id));";
+            string createBetsTable = @"
+                CREATE TABLE IF NOT EXISTS Bets (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    UserId INT,
+                    BetDescription VARCHAR(255),
+                    BetAmount DECIMAL(10, 2),
+                    FOREIGN KEY (UserId) REFERENCES Users(Id)
+                );";
 
             using (var command = new MySqlCommand(createUsersTable, connection))
             {
@@ -61,6 +66,20 @@ class Program
             using (var command = new MySqlCommand(createBetsTable, connection))
             {
                 command.ExecuteNonQuery();
+            }
+
+            string checkBalanceColumn = "SHOW COLUMNS FROM Users LIKE 'Balance';";
+            using (var command = new MySqlCommand(checkBalanceColumn, connection))
+            {
+                var result = command.ExecuteScalar();
+                if (result == null) 
+                {
+                    string addBalanceColumn = "ALTER TABLE Users ADD COLUMN Balance DECIMAL(10, 2) DEFAULT 50.00;";
+                    using (var alterCommand = new MySqlCommand(addBalanceColumn, connection))
+                    {
+                        alterCommand.ExecuteNonQuery();
+                    }
+                }
             }
         }
     }
@@ -85,7 +104,7 @@ class Program
                 try
                 {
                     command.ExecuteNonQuery();
-                    Console.WriteLine("Account succesvol aangemaakt!");
+                    Console.WriteLine("Account succesvol aangemaakt! Je start met 50 4S-dollars.");
                 }
                 catch (MySqlException ex)
                 {
@@ -135,7 +154,8 @@ class Program
         {
             Console.WriteLine("1. Voeg een weddenschap toe");
             Console.WriteLine("2. Bekijk weddenschappen");
-            Console.WriteLine("3. Log uit");
+            Console.WriteLine("3. Bekijk saldo");
+            Console.WriteLine("4. Log uit");
             Console.Write("Kies een optie: ");
             string keuze = Console.ReadLine();
 
@@ -148,10 +168,38 @@ class Program
                     BekijkWeddenschappen(userId);
                     break;
                 case "3":
+                    ToonSaldo(userId);
+                    break;
+                case "4":
                     return;
                 default:
                     Console.WriteLine("Ongeldige keuze.");
                     break;
+            }
+        }
+    }
+
+    static void ToonSaldo(int userId)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "SELECT Balance FROM Users WHERE Id = @userId;";
+
+            using (var command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@userId", userId);
+
+                object result = command.ExecuteScalar();
+                if (result != null)
+                {
+                    decimal saldo = Convert.ToDecimal(result);
+                    Console.WriteLine($"Je huidige saldo is: €{saldo:F2}");
+                }
+                else
+                {
+                    Console.WriteLine("Saldo kon niet worden opgehaald.");
+                }
             }
         }
     }
@@ -161,12 +209,29 @@ class Program
         Console.Write("Beschrijving van de weddenschap: ");
         string beschrijving = Console.ReadLine();
         Console.Write("Inzet bedrag: ");
+
         if (decimal.TryParse(Console.ReadLine(), out decimal bedrag))
         {
             using (var connection = new MySqlConnection(connectionString))
             {
                 connection.Open();
-                string query = "INSERT INTO Bets (UserId, BetDescription, BetAmount) VALUES (@userId, @beschrijving, @bedrag);";
+
+                string getBalanceQuery = "SELECT Balance FROM Users WHERE Id = @userId;";
+                using (var balanceCommand = new MySqlCommand(getBalanceQuery, connection))
+                {
+                    balanceCommand.Parameters.AddWithValue("@userId", userId);
+                    decimal huidigSaldo = Convert.ToDecimal(balanceCommand.ExecuteScalar());
+
+                    if (huidigSaldo < bedrag)
+                    {
+                        Console.WriteLine("Onvoldoende saldo om deze weddenschap te plaatsen.");
+                        return;
+                    }
+                }
+
+                string query = @"
+                    INSERT INTO Bets (UserId, BetDescription, BetAmount) VALUES (@userId, @beschrijving, @bedrag);
+                    UPDATE Users SET Balance = Balance - @bedrag WHERE Id = @userId;";
 
                 using (var command = new MySqlCommand(query, connection))
                 {
