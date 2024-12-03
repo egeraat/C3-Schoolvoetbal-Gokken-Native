@@ -49,13 +49,12 @@ class Program
                     Balance DECIMAL(10, 2) DEFAULT 50.00
                 );";
 
-            string createMatchesTable = @"
-                CREATE TABLE IF NOT EXISTS Matches (
-                    Id INT AUTO_INCREMENT PRIMARY KEY,
-                    TeamA VARCHAR(50),
-                    TeamB VARCHAR(50),
-                    Result VARCHAR(50)
-                );";
+            string createBetsTable = "CREATE TABLE IF NOT EXISTS Bets (" +
+                                     "Id INT AUTO_INCREMENT PRIMARY KEY, " +
+                                     "UserId INT, " +
+                                     "BetDescription VARCHAR(255), " +
+                                     "BetAmount DECIMAL(10, 2), " +
+                                     "FOREIGN KEY (UserId) REFERENCES Users(Id));";
 
             string createBetsTable = @"
                 CREATE TABLE IF NOT EXISTS Bets (
@@ -79,20 +78,6 @@ class Program
             using (var command = new MySqlCommand(createBetsTable, connection))
             {
                 command.ExecuteNonQuery();
-            }
-
-            string checkBalanceColumn = "SHOW COLUMNS FROM Users LIKE 'Balance';";
-            using (var command = new MySqlCommand(checkBalanceColumn, connection))
-            {
-                var result = command.ExecuteScalar();
-                if (result == null)
-                {
-                    string addBalanceColumn = "ALTER TABLE Users ADD COLUMN Balance DECIMAL(10, 2) DEFAULT 50.00;";
-                    using (var alterCommand = new MySqlCommand(addBalanceColumn, connection))
-                    {
-                        alterCommand.ExecuteNonQuery();
-                    }
-                }
             }
         }
     }
@@ -193,37 +178,17 @@ class Program
         }
     }
 
-    static void ToonSaldo(int userId)
+    static void VoegWeddenschapToe(int userId)
     {
-        using (var connection = new MySqlConnection(connectionString))
+        Console.Write("Beschrijving van de weddenschap: ");
+        string beschrijving = Console.ReadLine();
+        Console.Write("Inzet bedrag: ");
+        if (decimal.TryParse(Console.ReadLine(), out decimal bedrag))
         {
-            connection.Open();
-            string query = "SELECT Balance FROM Users WHERE Id = @userId;";
-
-            using (var command = new MySqlCommand(query, connection))
+            using (var connection = new MySqlConnection(connectionString))
             {
-                command.Parameters.AddWithValue("@userId", userId);
-
-                object result = command.ExecuteScalar();
-                if (result != null)
-                {
-                    decimal saldo = Convert.ToDecimal(result);
-                    Console.WriteLine($"Je huidige saldo is: €{saldo:F2}");
-                }
-                else
-                {
-                    Console.WriteLine("Saldo kon niet worden opgehaald.");
-                }
-            }
-        }
-    }
-
-    static void PlaatsWeddenschap(int userId)
-    {
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-            string query = "SELECT Id, TeamA, TeamB FROM Matches WHERE Result IS NULL;";
+                connection.Open();
+                string query = "INSERT INTO Bets (UserId, BetDescription, BetAmount) VALUES (@userId, @beschrijving, @bedrag);";
 
             using (var command = new MySqlCommand(query, connection))
             using (var reader = command.ExecuteReader())
