@@ -41,27 +41,30 @@ class Program
         {
             connection.Open();
 
-            string createUsersTable = "CREATE TABLE IF NOT EXISTS Users (" +
-                                      "Id INT AUTO_INCREMENT PRIMARY KEY, " +
-                                      "Username VARCHAR(50) NOT NULL UNIQUE, " +
-                                      "Password VARCHAR(50) NOT NULL, " +
-                                      "Balance DECIMAL(10, 2) DEFAULT 100.00);";
+            string createUsersTable = @"
+                CREATE TABLE IF NOT EXISTS Users (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    Username VARCHAR(50) NOT NULL UNIQUE,
+                    Password VARCHAR(50) NOT NULL,
+                    Balance DECIMAL(10, 2) DEFAULT 50.00
+                );";
 
-            string createMatchesTable = "CREATE TABLE IF NOT EXISTS Matches (" +
-                                        "Id INT AUTO_INCREMENT PRIMARY KEY, " +
-                                        "TeamA VARCHAR(50), " +
-                                        "TeamB VARCHAR(50), " +
-                                        "Result VARCHAR(50));";
+            string createMatchesTable = @"
+                CREATE TABLE IF NOT EXISTS Matches (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    TeamA VARCHAR(50),
+                    TeamB VARCHAR(50),
+                    Result VARCHAR(50)
+                );";
 
-            string createBetsTable = "CREATE TABLE IF NOT EXISTS Bets (" +
-                                     "Id INT AUTO_INCREMENT PRIMARY KEY, " +
-                                     "UserId INT, " +
-                                     "MatchId INT, " +
-                                     "BetOnTeam VARCHAR(50), " +
-                                     "BetAmount DECIMAL(10, 2), " +
-                                     "HasWon BOOLEAN, " +
-                                     "FOREIGN KEY (UserId) REFERENCES Users(Id), " +
-                                     "FOREIGN KEY (MatchId) REFERENCES Matches(Id));";
+            string createBetsTable = @"
+                CREATE TABLE IF NOT EXISTS Bets (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    UserId INT,
+                    BetDescription VARCHAR(255),
+                    BetAmount DECIMAL(10, 2),
+                    FOREIGN KEY (UserId) REFERENCES Users(Id)
+                );";
 
             using (var command = new MySqlCommand(createUsersTable, connection))
             {
@@ -76,6 +79,20 @@ class Program
             using (var command = new MySqlCommand(createBetsTable, connection))
             {
                 command.ExecuteNonQuery();
+            }
+
+            string checkBalanceColumn = "SHOW COLUMNS FROM Users LIKE 'Balance';";
+            using (var command = new MySqlCommand(checkBalanceColumn, connection))
+            {
+                var result = command.ExecuteScalar();
+                if (result == null)
+                {
+                    string addBalanceColumn = "ALTER TABLE Users ADD COLUMN Balance DECIMAL(10, 2) DEFAULT 50.00;";
+                    using (var alterCommand = new MySqlCommand(addBalanceColumn, connection))
+                    {
+                        alterCommand.ExecuteNonQuery();
+                    }
+                }
             }
         }
     }
@@ -100,7 +117,7 @@ class Program
                 try
                 {
                     command.ExecuteNonQuery();
-                    Console.WriteLine("Account succesvol aangemaakt!");
+                    Console.WriteLine("Account succesvol aangemaakt! Je start met 50 4S-dollars.");
                 }
                 catch (MySqlException ex)
                 {
@@ -151,7 +168,7 @@ class Program
         {
             Console.WriteLine("1. Plaats een weddenschap");
             Console.WriteLine("2. Bekijk weddenschappen");
-            Console.WriteLine("3. Verwerk uitslagen");
+            Console.WriteLine("3. Bekijk saldo");
             Console.WriteLine("4. Log uit");
             Console.Write("Kies een optie: ");
             string keuze = Console.ReadLine();
@@ -165,13 +182,38 @@ class Program
                     BekijkWeddenschappen(userId);
                     break;
                 case "3":
-                    VerwerkUitslagen();
+                    ToonSaldo(userId);
                     break;
                 case "4":
                     return;
                 default:
                     Console.WriteLine("Ongeldige keuze.");
                     break;
+            }
+        }
+    }
+
+    static void ToonSaldo(int userId)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "SELECT Balance FROM Users WHERE Id = @userId;";
+
+            using (var command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@userId", userId);
+
+                object result = command.ExecuteScalar();
+                if (result != null)
+                {
+                    decimal saldo = Convert.ToDecimal(result);
+                    Console.WriteLine($"Je huidige saldo is: €{saldo:F2}");
+                }
+                else
+                {
+                    Console.WriteLine("Saldo kon niet worden opgehaald.");
+                }
             }
         }
     }
@@ -267,92 +309,9 @@ class Program
                         string teamB = reader.GetString("TeamB");
                         string betOnTeam = reader.GetString("BetOnTeam");
                         decimal betAmount = reader.GetDecimal("BetAmount");
-                        string result = reader.IsDBNull(reader.GetOrdinal("HasWon")) ? "Nog niet beslist" : reader.GetBoolean("HasWon") ? "Gewonnen" : "Verloren";
+                        string hasWon = reader.IsDBNull(reader.GetOrdinal("HasWon")) ? "In behandeling" : reader.GetBoolean("HasWon") ? "Gewonnen" : "Verloren";
 
-                        Console.WriteLine($"ID: {betId}: {teamA} vs {teamB} | Gok: {betOnTeam} | Inzet: 4S-{betAmount} | Resultaat: {result}");
-                    }
-                }
-            }
-        }
-    }
-
-    static void VerwerkUitslagen()
-    {
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-            string query = "SELECT Id, TeamA, TeamB FROM Matches WHERE Result IS NULL;";
-
-            using (var command = new MySqlCommand(query, connection))
-            using (var reader = command.ExecuteReader())
-            {
-                Console.WriteLine("Onbesliste wedstrijden:");
-                while (reader.Read())
-                {
-                    int matchId = reader.GetInt32("Id");
-                    string teamA = reader.GetString("TeamA");
-                    string teamB = reader.GetString("TeamB");
-                    Console.WriteLine($"{matchId}: {teamA} vs {teamB}");
-                }
-            }
-
-            Console.Write("Voer het ID van de wedstrijd in die je wilt bijwerken: ");
-            if (int.TryParse(Console.ReadLine(), out int selectedMatchId)) // Renamed here
-            {
-                if (!WedstrijdBestaat(selectedMatchId, connection))
-                {
-                    Console.WriteLine("De opgegeven wedstrijd ID bestaat niet.");
-                    return;
-                }
-
-                Console.Write("Wat is het resultaat van de wedstrijd (TeamA/TeamB): ");
-                string result = Console.ReadLine();
-
-                string updateQuery = "UPDATE Matches SET Result = @result WHERE Id = @matchId;";
-
-                using (var updateCommand = new MySqlCommand(updateQuery, connection))
-                {
-                    updateCommand.Parameters.AddWithValue("@result", result);
-                    updateCommand.Parameters.AddWithValue("@matchId", selectedMatchId); // Use selectedMatchId
-                    updateCommand.ExecuteNonQuery();
-
-                    UpdateBetsAfterMatch(result, selectedMatchId, connection); // Pass selectedMatchId
-                }
-            }
-        }
-    }
-
-    static void UpdateBetsAfterMatch(string result, int matchId, MySqlConnection connection)
-    {
-        string betQuery = "SELECT Id, BetOnTeam, BetAmount FROM Bets WHERE MatchId = @matchId;";
-        using (var command = new MySqlCommand(betQuery, connection))
-        {
-            command.Parameters.AddWithValue("@matchId", matchId);
-            using (var reader = command.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    int betId = reader.GetInt32("Id");
-                    string betOnTeam = reader.GetString("BetOnTeam");
-                    decimal betAmount = reader.GetDecimal("BetAmount");
-
-                    bool hasWon = (betOnTeam == result);
-
-                    string updateBetQuery = "UPDATE Bets SET HasWon = @hasWon WHERE Id = @betId;";
-                    using (var updateCommand = new MySqlCommand(updateBetQuery, connection))
-                    {
-                        updateCommand.Parameters.AddWithValue("@hasWon", hasWon);
-                        updateCommand.Parameters.AddWithValue("@betId", betId);
-                        updateCommand.ExecuteNonQuery();
-                    }
-
-                    if (hasWon)
-                    {
-                        Console.WriteLine($"Weddenschap ID {betId} heeft gewonnen!");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Weddenschap ID {betId} heeft verloren.");
+                        Console.WriteLine($"{betId}: {teamA} vs {teamB} - Wed op {betOnTeam}, Bedrag: {betAmount} - {hasWon}");
                     }
                 }
             }
