@@ -297,9 +297,9 @@ class Program
             }
 
             Console.Write("Voer het ID van de wedstrijd in die je wilt bijwerken: ");
-            if (int.TryParse(Console.ReadLine(), out int matchId))
+            if (int.TryParse(Console.ReadLine(), out int selectedMatchId)) // Renamed here
             {
-                if (!WedstrijdBestaat(matchId, connection))
+                if (!WedstrijdBestaat(selectedMatchId, connection))
                 {
                     Console.WriteLine("De opgegeven wedstrijd ID bestaat niet.");
                     return;
@@ -313,10 +313,10 @@ class Program
                 using (var updateCommand = new MySqlCommand(updateQuery, connection))
                 {
                     updateCommand.Parameters.AddWithValue("@result", result);
-                    updateCommand.Parameters.AddWithValue("@matchId", matchId);
+                    updateCommand.Parameters.AddWithValue("@matchId", selectedMatchId); // Use selectedMatchId
                     updateCommand.ExecuteNonQuery();
 
-                    UpdateBetsAfterMatch(result, matchId, connection);
+                    UpdateBetsAfterMatch(result, selectedMatchId, connection); // Pass selectedMatchId
                 }
             }
         }
@@ -324,13 +324,38 @@ class Program
 
     static void UpdateBetsAfterMatch(string result, int matchId, MySqlConnection connection)
     {
-        string updateBetsQuery = "UPDATE Bets SET HasWon = CASE WHEN BetOnTeam = @result THEN TRUE ELSE FALSE END WHERE MatchId = @matchId;";
-
-        using (var updateCommand = new MySqlCommand(updateBetsQuery, connection))
+        string betQuery = "SELECT Id, BetOnTeam, BetAmount FROM Bets WHERE MatchId = @matchId;";
+        using (var command = new MySqlCommand(betQuery, connection))
         {
-            updateCommand.Parameters.AddWithValue("@result", result);
-            updateCommand.Parameters.AddWithValue("@matchId", matchId);
-            updateCommand.ExecuteNonQuery();
+            command.Parameters.AddWithValue("@matchId", matchId);
+            using (var reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    int betId = reader.GetInt32("Id");
+                    string betOnTeam = reader.GetString("BetOnTeam");
+                    decimal betAmount = reader.GetDecimal("BetAmount");
+
+                    bool hasWon = (betOnTeam == result);
+
+                    string updateBetQuery = "UPDATE Bets SET HasWon = @hasWon WHERE Id = @betId;";
+                    using (var updateCommand = new MySqlCommand(updateBetQuery, connection))
+                    {
+                        updateCommand.Parameters.AddWithValue("@hasWon", hasWon);
+                        updateCommand.Parameters.AddWithValue("@betId", betId);
+                        updateCommand.ExecuteNonQuery();
+                    }
+
+                    if (hasWon)
+                    {
+                        Console.WriteLine($"Weddenschap ID {betId} heeft gewonnen!");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Weddenschap ID {betId} heeft verloren.");
+                    }
+                }
+            }
         }
     }
 }
