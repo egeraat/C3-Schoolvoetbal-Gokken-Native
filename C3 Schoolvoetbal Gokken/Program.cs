@@ -49,12 +49,13 @@ class Program
                     Balance DECIMAL(10, 2) DEFAULT 50.00
                 );";
 
-            string createBetsTable = "CREATE TABLE IF NOT EXISTS Bets (" +
-                                     "Id INT AUTO_INCREMENT PRIMARY KEY, " +
-                                     "UserId INT, " +
-                                     "BetDescription VARCHAR(255), " +
-                                     "BetAmount DECIMAL(10, 2), " +
-                                     "FOREIGN KEY (UserId) REFERENCES Users(Id));";
+            string createMatchesTable = @"
+                CREATE TABLE IF NOT EXISTS Matches (
+                    Id INT AUTO_INCREMENT PRIMARY KEY,
+                    TeamA VARCHAR(50),
+                    TeamB VARCHAR(50),
+                    Result VARCHAR(50)
+                );";
 
             string createBetsTable = @"
                 CREATE TABLE IF NOT EXISTS Bets (
@@ -79,6 +80,20 @@ class Program
             {
                 command.ExecuteNonQuery();
             }
+
+            string checkBalanceColumn = "SHOW COLUMNS FROM Users LIKE 'Balance';";
+            using (var command = new MySqlCommand(checkBalanceColumn, connection))
+            {
+                var result = command.ExecuteScalar();
+                if (result == null)
+                {
+                    string addBalanceColumn = "ALTER TABLE Users ADD COLUMN Balance DECIMAL(10, 2) DEFAULT 50.00;";
+                    using (var alterCommand = new MySqlCommand(addBalanceColumn, connection))
+                    {
+                        alterCommand.ExecuteNonQuery();
+                    }
+                }
+            }
         }
     }
 
@@ -92,7 +107,7 @@ class Program
         using (var connection = new MySqlConnection(connectionString))
         {
             connection.Open();
-            string query = "INSERT INTO Users (Username, Password) VALUES (@username, @password);";
+            string query = "INSERT INTO Users (Username, Password, Balance) VALUES (@username, @password, 50.00);";  // Start met 50 4S-dollars
 
             using (var command = new MySqlCommand(query, connection))
             {
@@ -111,7 +126,7 @@ class Program
             }
         }
     }
-    //
+
     static void LogIn()
     {
         Console.Write("Gebruikersnaam: ");
@@ -178,17 +193,37 @@ class Program
         }
     }
 
-    static void VoegWeddenschapToe(int userId)
+    static void ToonSaldo(int userId)
     {
-        Console.Write("Beschrijving van de weddenschap: ");
-        string beschrijving = Console.ReadLine();
-        Console.Write("Inzet bedrag: ");
-        if (decimal.TryParse(Console.ReadLine(), out decimal bedrag))
+        using (var connection = new MySqlConnection(connectionString))
         {
-            using (var connection = new MySqlConnection(connectionString))
+            connection.Open();
+            string query = "SELECT Balance FROM Users WHERE Id = @userId;";
+
+            using (var command = new MySqlCommand(query, connection))
             {
-                connection.Open();
-                string query = "INSERT INTO Bets (UserId, BetDescription, BetAmount) VALUES (@userId, @beschrijving, @bedrag);";
+                command.Parameters.AddWithValue("@userId", userId);
+
+                object result = command.ExecuteScalar();
+                if (result != null)
+                {
+                    decimal saldo = Convert.ToDecimal(result);
+                    Console.WriteLine($"Je huidige saldo is: €{saldo:F2}");
+                }
+                else
+                {
+                    Console.WriteLine("Saldo kon niet worden opgehaald.");
+                }
+            }
+        }
+    }
+
+    static void PlaatsWeddenschap(int userId)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "SELECT Id, TeamA, TeamB FROM Matches WHERE Result IS NULL;";
 
             using (var command = new MySqlCommand(query, connection))
             using (var reader = command.ExecuteReader())
@@ -217,17 +252,39 @@ class Program
                 Console.Write("Inzet bedrag in 4S-dollars: ");
                 if (decimal.TryParse(Console.ReadLine(), out decimal betAmount))
                 {
-                    string insertQuery = "INSERT INTO Bets (UserId, MatchId, BetOnTeam, BetAmount) VALUES (@userId, @matchId, @betOnTeam, @betAmount);";
-
-                    using (var insertCommand = new MySqlCommand(insertQuery, connection))
+                    // Haal het huidige saldo van de gebruiker op
+                    string saldoQuery = "SELECT Balance FROM Users WHERE Id = @userId;";
+                    using (var saldoCommand = new MySqlCommand(saldoQuery, connection))
                     {
-                        insertCommand.Parameters.AddWithValue("@userId", userId);
-                        insertCommand.Parameters.AddWithValue("@matchId", gekozenMatchId);
-                        insertCommand.Parameters.AddWithValue("@betOnTeam", betOnTeam);
-                        insertCommand.Parameters.AddWithValue("@betAmount", betAmount);
+                        saldoCommand.Parameters.AddWithValue("@userId", userId);
+                        decimal saldo = (decimal)saldoCommand.ExecuteScalar();
 
-                        insertCommand.ExecuteNonQuery();
-                        Console.WriteLine("Weddenschap succesvol geplaatst!");
+                        if (saldo < betAmount)
+                        {
+                            Console.WriteLine("Je hebt niet genoeg saldo om deze weddenschap te plaatsen.");
+                            return; // We stoppen hier en gaan terug naar het menu.
+                        }
+
+                        // Plaats de weddenschap
+                        string insertQuery = "INSERT INTO Bets (UserId, MatchId, BetOnTeam, BetAmount) VALUES (@userId, @matchId, @betOnTeam, @betAmount);";
+                        using (var insertCommand = new MySqlCommand(insertQuery, connection))
+                        {
+                            insertCommand.Parameters.AddWithValue("@userId", userId);
+                            insertCommand.Parameters.AddWithValue("@matchId", gekozenMatchId);
+                            insertCommand.Parameters.AddWithValue("@betOnTeam", betOnTeam);
+                            insertCommand.Parameters.AddWithValue("@betAmount", betAmount);
+                            insertCommand.ExecuteNonQuery();
+                            Console.WriteLine("Weddenschap succesvol geplaatst!");
+
+                            // Werk het saldo bij na het plaatsen van de weddenschap
+                            string updateSaldoQuery = "UPDATE Users SET Balance = Balance - @betAmount WHERE Id = @userId;";
+                            using (var updateSaldoCommand = new MySqlCommand(updateSaldoQuery, connection))
+                            {
+                                updateSaldoCommand.Parameters.AddWithValue("@betAmount", betAmount);
+                                updateSaldoCommand.Parameters.AddWithValue("@userId", userId);
+                                updateSaldoCommand.ExecuteNonQuery();
+                            }
+                        }
                     }
                 }
                 else
@@ -241,6 +298,7 @@ class Program
             }
         }
     }
+
 
     static bool WedstrijdBestaat(int wedstrijdId, MySqlConnection connection)
     {
@@ -274,9 +332,9 @@ class Program
                         string teamB = reader.GetString("TeamB");
                         string betOnTeam = reader.GetString("BetOnTeam");
                         decimal betAmount = reader.GetDecimal("BetAmount");
-                        string hasWon = reader.IsDBNull(reader.GetOrdinal("HasWon")) ? "In behandeling" : reader.GetBoolean("HasWon") ? "Gewonnen" : "Verloren";
+                        string result = reader.IsDBNull(reader.GetOrdinal("HasWon")) ? "Onbeslist" : reader.GetBoolean("HasWon") ? "Gewonnen" : "Verloren";
 
-                        Console.WriteLine($"{betId}: {teamA} vs {teamB} - Wed op {betOnTeam}, Bedrag: {betAmount} - {hasWon}");
+                        Console.WriteLine($"Wedstrijd {teamA} vs {teamB}, Weddenschap op {betOnTeam}, Inzet: {betAmount} 4S-dollars, Resultaat: {result}");
                     }
                 }
             }
