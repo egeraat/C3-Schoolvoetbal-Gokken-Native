@@ -47,26 +47,26 @@ public static class AccountManager
         }
     }
 
-    public static void LogIn()
+    public static int Login()
     {
         Console.Clear();
-        Console.Write("Gebruikersnaam: ");
+        Console.Write("Voer je gebruikersnaam in: ");
         string username = Console.ReadLine();
-        Console.Write("Wachtwoord: ");
+        Console.Write("Voer je wachtwoord in: ");
         string password = Console.ReadLine();
 
-        int userId = ValidUserLogin(username, password);
+        int userId = Authenticate(username, password);
         if (userId == -1)
         {
-            Console.WriteLine("Ongeldige inloggegevens.");
-            return;
+            Console.WriteLine("Ongeldige gebruikersnaam of wachtwoord.");
+            return -1;
         }
 
-        Console.WriteLine($"Succesvol ingelogd! Uw saldo is: €{BetManager.GetUserBalance(userId):F2}");
-        BetManager.ManageBets(userId);
+        Console.WriteLine($"Welkom, {username}!");
+        return userId;
     }
 
-    private static int ValidUserLogin(string username, string password)
+    private static int Authenticate(string username, string password)
     {
         using (var connection = new MySqlConnection(connectionString))
         {
@@ -76,14 +76,8 @@ public static class AccountManager
             {
                 command.Parameters.AddWithValue("@username", username);
                 command.Parameters.AddWithValue("@password", password);
-
-                using (var reader = command.ExecuteReader())
-                {
-                    if (reader.Read())
-                        return reader.GetInt32("Id");
-                }
+                return Convert.ToInt32(command.ExecuteScalar());
             }
         }
-        return -1;
     }
 }

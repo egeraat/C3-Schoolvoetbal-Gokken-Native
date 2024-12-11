@@ -1,17 +1,16 @@
 ﻿using System;
 
-class Program
+public class Program
 {
-    static void Main()
+    public static void Main()
     {
-        DatabaseInitializer.InitializeDatabase();
-
         while (true)
         {
             Console.Clear();
+            Console.WriteLine("Maak een keuze");
             Console.WriteLine("1. Maak een account");
-            Console.WriteLine("2. Log in");
-            Console.WriteLine("3. Sluit af");
+            Console.WriteLine("2. Login");
+            Console.WriteLine("3. Exit");
             Console.Write("Kies een optie: ");
             string keuze = Console.ReadLine();
 
@@ -21,13 +20,16 @@ class Program
                     AccountManager.MaakAccount();
                     break;
                 case "2":
-                    AccountManager.LogIn();
+                    int userId = AccountManager.Login();
+                    if (userId != -1)
+                    {
+                        BetManager.ManageBets(userId);
+                    }
                     break;
                 case "3":
-                    Environment.Exit(0);
-                    break;
+                    return;
                 default:
-                    Console.WriteLine("Ongeldige keuze. Probeer het opnieuw.");
+                    Console.WriteLine("Ongeldige keuze.");
                     break;
             }
         }
