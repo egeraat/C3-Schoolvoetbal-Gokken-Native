@@ -2,7 +2,8 @@
 
 public static class DatabaseInitializer
 {
-    static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=c_sharp_dev;Pwd=c_sharp_dev;";
+    static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=root;Pwd=;";
+
 
     public static void InitializeDatabase()
     {

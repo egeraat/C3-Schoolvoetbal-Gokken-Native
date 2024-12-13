@@ -3,7 +3,8 @@ using System;
 
 public static class AccountManager
 {
-    static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=c_sharp_dev;Pwd=c_sharp_dev;";
+    static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=root;Pwd=;";
+
 
     public static void MaakAccount()
     {

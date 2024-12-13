@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 public class BetManager
 {
-    static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=c_sharp_dev;Pwd=c_sharp_dev;";
+    static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=root;Pwd=;";
 
     public static void ManageBets(int userId)
     {
@@ -198,6 +198,69 @@ public class BetManager
         }
     }
 
+    public static void UpdateMatchResult(int matchId, string winner)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "UPDATE Matches SET Result = @winner WHERE Id = @matchId;";
+            using (var command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@winner", winner);
+                command.Parameters.AddWithValue("@matchId", matchId);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        // Na het bijwerken van de wedstrijdresultaten, controleren we of de weddenschappen gewonnen zijn
+        CheckAndPayWinners(matchId, winner);
+    }
+
+    public static void CheckAndPayWinners(int matchId, string winner)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "SELECT UserId, BetAmount, BetOnTeam FROM Bets WHERE MatchId = @matchId;";
+            using (var command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@matchId", matchId);
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        int userId = reader.GetInt32("UserId");
+                        decimal betAmount = reader.GetDecimal("BetAmount");
+                        string betOnTeam = reader.GetString("BetOnTeam");
+
+                        // Als de gebruiker het juiste team heeft gekozen, verdubbelen we hun inzet
+                        if (betOnTeam.Equals(winner, StringComparison.OrdinalIgnoreCase))
+                        {
+                            decimal winnings = betAmount * 2;
+                            UpdateUserBalance(userId, winnings);
+                            Console.WriteLine($"Gebruiker {userId} heeft gewonnen! Winst: €{winnings:F2}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public static void UpdateUserBalance(int userId, decimal amount)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "UPDATE Users SET Balance = Balance + @amount WHERE Id = @userId;";
+            using (var command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@amount", amount);
+                command.Parameters.AddWithValue("@userId", userId);
+                command.ExecuteNonQuery();
+            }
+        }
+    }
+
     public static List<Match> GetAvailableMatches()
     {
         var matches = new List<Match>();
@@ -295,78 +358,20 @@ public class BetManager
             return;
         }
 
-        var geselecteerdeWedstrijd = wedstrijden[matchChoice - 1];
-        Console.WriteLine($"Je hebt gekozen voor: {geselecteerdeWedstrijd.TeamA} vs {geselecteerdeWedstrijd.TeamB}");
-        Console.Write("Voer de nieuwe uitkomst in (TeamA of TeamB): ");
-        string result = Console.ReadLine().Trim();
-
-        if (result != geselecteerdeWedstrijd.TeamA && result != geselecteerdeWedstrijd.TeamB)
+        var selectedMatch = wedstrijden[matchChoice - 1];
+        Console.WriteLine($"Je hebt gekozen voor: {selectedMatch.TeamA} vs {selectedMatch.TeamB}");
+        Console.Write("Kies de winnaar (1 voor team A, 2 voor team B): ");
+        int winnerChoice;
+        if (!int.TryParse(Console.ReadLine(), out winnerChoice) || winnerChoice < 1 || winnerChoice > 2)
         {
-            Console.WriteLine("Ongeldige keuze. De uitkomst moet overeenkomen met een van de teams.");
+            Console.WriteLine("Ongeldige keuze.");
             Console.ReadKey();
             return;
         }
 
-        ManipuleerWedstrijdResultaat(geselecteerdeWedstrijd.Id, result);
-        Console.WriteLine($"Wedstrijdresultaat succesvol gemanipuleerd!");
-        VerwerkWeddenschappenNaManipulatie(geselecteerdeWedstrijd.Id, result);
+        string winner = winnerChoice == 1 ? selectedMatch.TeamA : selectedMatch.TeamB;
+        UpdateMatchResult(selectedMatch.Id, winner);
+        Console.WriteLine($"Wedstrijdresultaat bijgewerkt naar: {winner} wint.");
         Console.ReadKey();
-    }
-
-    public static void ManipuleerWedstrijdResultaat(int matchId, string result)
-    {
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-            string query = "UPDATE Matches SET Result = @result WHERE Id = @matchId;";
-            using (var command = new MySqlCommand(query, connection))
-            {
-                command.Parameters.AddWithValue("@matchId", matchId);
-                command.Parameters.AddWithValue("@result", result);
-                command.ExecuteNonQuery();
-            }
-        }
-    }
-
-    public static void VerwerkWeddenschappenNaManipulatie(int matchId, string winningTeam)
-    {
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-            string query = @"
-                SELECT Bets.UserId, Bets.BetAmount, Bets.BetOnTeam
-                FROM Bets 
-                JOIN Matches ON Bets.MatchId = Matches.Id 
-                WHERE Bets.MatchId = @matchId;";
-
-            using (var command = new MySqlCommand(query, connection))
-            {
-                command.Parameters.AddWithValue("@matchId", matchId);
-
-                using (var reader = command.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        int userId = reader.GetInt32("UserId");
-                        decimal betAmount = reader.GetDecimal("BetAmount");
-                        string betOnTeam = reader.GetString("BetOnTeam");
-
-                        decimal newBalance = GetUserBalance(userId);
-                        if (betOnTeam.ToUpper() == winningTeam.ToUpper())
-                        {
-                            newBalance += betAmount * 2;
-                        }
-
-                        string updateQuery = "UPDATE Users SET Balance = @newBalance WHERE Id = @userId;";
-                        using (var updateCommand = new MySqlCommand(updateQuery, connection))
-                        {
-                            updateCommand.Parameters.AddWithValue("@newBalance", newBalance);
-                            updateCommand.Parameters.AddWithValue("@userId", userId);
-                            updateCommand.ExecuteNonQuery();
-                        }
-                    }
-                }
-            }
-        }
     }
 }
