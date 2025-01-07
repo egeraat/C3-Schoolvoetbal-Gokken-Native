@@ -1,6 +1,9 @@
 ﻿using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Net.Http;
+using System.Text.Json;
 
 public class BetManager
 {
@@ -16,6 +19,7 @@ public class BetManager
             Console.WriteLine("3. Bekijk saldo");
             Console.WriteLine("4. Log uit");
             Console.WriteLine("5. Admin login");
+            Console.WriteLine("6. Haal wedstrijden op via API");
             Console.Write("Kies een optie: ");
             string keuze = Console.ReadLine();
 
@@ -36,6 +40,9 @@ public class BetManager
                 case "5":
                     AdminLogin();
                     break;
+                case "6":
+                    FetchMatchesFromAPI().Wait();
+                    break;
                 default:
                     Console.WriteLine("Ongeldige keuze.");
                     break;
@@ -43,7 +50,50 @@ public class BetManager
         }
     }
 
-    public static void BekijkWeddenschappen(int userId)
+
+
+public static async Task FetchMatchesFromAPI()
+{
+    Console.Clear();
+    string apiUrl = "http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php";
+
+    using (HttpClient client = new HttpClient())
+    {
+        try
+        {
+            Console.WriteLine("Bezig met ophalen van gegevens van de API...");
+
+            HttpResponseMessage response = await client.GetAsync(apiUrl);
+
+            if (response.IsSuccessStatusCode)
+            {
+                string jsonResponse = await response.Content.ReadAsStringAsync();
+                var matches = JsonSerializer.Deserialize<List<Match>>(jsonResponse);
+
+                Console.WriteLine("\nBeschikbare wedstrijden:");
+                foreach (var match in matches)
+                {
+                    Console.WriteLine($"Wedstrijd: {match.TeamA} vs {match.TeamB}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Fout bij ophalen van gegevens: {response.StatusCode}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Er is een fout opgetreden: {ex.Message}");
+        }
+    }
+
+    Console.WriteLine("\nDruk op een toets om door te gaan...");
+    Console.ReadKey();
+}
+
+
+
+public static void BekijkWeddenschappen(int userId)
     {
         Console.Clear();
         Console.WriteLine("Je geplaatste weddenschappen:");
