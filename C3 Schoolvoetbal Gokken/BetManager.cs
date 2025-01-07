@@ -19,7 +19,6 @@ public class BetManager
             Console.WriteLine("3. Bekijk saldo");
             Console.WriteLine("4. Log uit");
             Console.WriteLine("5. Admin login");
-            Console.WriteLine("6. Haal wedstrijden op via API");
             Console.Write("Kies een optie: ");
             string keuze = Console.ReadLine();
 
@@ -39,9 +38,6 @@ public class BetManager
                     return;
                 case "5":
                     AdminLogin();
-                    break;
-                case "6":
-                    FetchMatchesFromAPI().Wait();
                     break;
                 default:
                     Console.WriteLine("Ongeldige keuze.");
@@ -365,6 +361,7 @@ public static void BekijkWeddenschappen(int userId)
             Console.Clear();
             Console.WriteLine("1. Manipuleer weddenschapresultaten");
             Console.WriteLine("2. Log uit als admin");
+            Console.WriteLine("3. Haal wedstrijden op via API");
             Console.Write("Kies een optie: ");
             string keuze = Console.ReadLine();
 
@@ -376,6 +373,9 @@ public static void BekijkWeddenschappen(int userId)
                 case "2":
                     Console.WriteLine("Je bent uitgelogd als admin.");
                     return;
+                case "3":
+                    FetchMatchesFromAPI();
+                    break;
                 default:
                     Console.WriteLine("Ongeldige keuze.");
                     break;
