@@ -3,13 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Net.Http;
-using System.Text.Json;
+using System.Threading.Tasks;
 
 public class BetManager
 {
     static readonly string connectionString = "Server=localhost;Database=bets_db;Uid=root;Pwd=;";
 
-    public static void ManageBets(int userId)
+    public static async Task ManageBets(int userId)
     {
         while (true)
         {
@@ -25,7 +25,7 @@ public class BetManager
             switch (keuze)
             {
                 case "1":
-                    PlaatsWeddenschap(userId);
+                    await PlaatsWeddenschap(userId);
                     break;
                 case "2":
                     BekijkWeddenschappen(userId);
@@ -46,48 +46,122 @@ public class BetManager
         }
     }
 
-
-
-    public static async Task FetchMatchesFromAPI()
+    public static async Task<List<Match>> FetchMatchesFromAPI()
     {
-        Console.Clear();
         string apiUrl = "http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php";
-
         using (HttpClient client = new HttpClient())
         {
             try
             {
-                Console.WriteLine("Bezig met ophalen van gegevens van de API...");
-
                 HttpResponseMessage response = await client.GetAsync(apiUrl);
-
                 if (response.IsSuccessStatusCode)
                 {
                     string jsonResponse = await response.Content.ReadAsStringAsync();
-                    var matches = JsonSerializer.Deserialize<List<Match>>(jsonResponse);
-
-                    Console.WriteLine("\nBeschikbare wedstrijden:");
-                    foreach (var match in matches)
-                    {
-                        Console.WriteLine($"Wedstrijd: {match.TeamA} vs {match.TeamB}");
-                    }
+                    return JsonSerializer.Deserialize<List<Match>>(jsonResponse);
                 }
                 else
                 {
                     Console.WriteLine($"Fout bij ophalen van gegevens: {response.StatusCode}");
+                    return new List<Match>();
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Er is een fout opgetreden: {ex.Message}");
+                return new List<Match>();
             }
         }
+    }
 
-        Console.WriteLine("\nDruk op een toets om door te gaan...");
+    public static async Task PlaatsWeddenschap(int userId)
+    {
+        Console.Clear();
+        var wedstrijden = await FetchMatchesFromAPI();
+
+        if (wedstrijden == null || wedstrijden.Count == 0)
+        {
+            Console.WriteLine("Er zijn geen beschikbare wedstrijden om op te wedden.");
+            Console.ReadKey();
+            return;
+        }
+
+        Console.WriteLine("Beschikbare wedstrijden:");
+        for (int i = 0; i < wedstrijden.Count; i++)
+        {
+            Console.WriteLine($"{i + 1}: {wedstrijden[i].TeamA} vs {wedstrijden[i].TeamB}");
+        }
+
+        Console.Write("Kies het nummer van de wedstrijd: ");
+        if (!int.TryParse(Console.ReadLine(), out int matchChoice) || matchChoice < 1 || matchChoice > wedstrijden.Count)
+        {
+            Console.WriteLine("Ongeldige keuze.");
+            Console.ReadKey();
+            return;
+        }
+
+        var geselecteerdeWedstrijd = wedstrijden[matchChoice - 1];
+
+        Console.WriteLine($"Je hebt gekozen voor: {geselecteerdeWedstrijd.TeamA} vs {geselecteerdeWedstrijd.TeamB}");
+        Console.Write("Op welk team wil je wedden? ");
+        string betOnTeam = Console.ReadLine().Trim().ToUpper();
+
+        if (betOnTeam != geselecteerdeWedstrijd.TeamA.ToUpper() && betOnTeam != geselecteerdeWedstrijd.TeamB.ToUpper())
+        {
+            Console.WriteLine($"Ongeldige keuze. Je kunt alleen op {geselecteerdeWedstrijd.TeamA} of {geselecteerdeWedstrijd.TeamB} wedden.");
+            Console.ReadKey();
+            return;
+        }
+
+        Console.Write("Inzet bedrag in 4S-dollars: ");
+        if (!decimal.TryParse(Console.ReadLine(), out decimal betAmount) || betAmount <= 0)
+        {
+            Console.WriteLine("Ongeldig bedrag.");
+            Console.ReadKey();
+            return;
+        }
+
+        decimal currentBalance = GetUserBalance(userId);
+        if (currentBalance < betAmount)
+        {
+            Console.WriteLine("Je hebt niet genoeg saldo voor deze weddenschap.");
+            Console.ReadKey();
+            return;
+        }
+
+        PlaatsWeddenschapInDatabase(userId, geselecteerdeWedstrijd.Id, betOnTeam, betAmount, geselecteerdeWedstrijd.TeamA, geselecteerdeWedstrijd.TeamB);
+        Console.WriteLine("Weddenschap succesvol geplaatst!");
         Console.ReadKey();
     }
 
+    public static void PlaatsWeddenschapInDatabase(int userId, int matchId, string betOnTeam, decimal betAmount, string teamA, string teamB)
+    {
+        using (var connection = new MySqlConnection(connectionString))
+        {
+            connection.Open();
 
+            string insertBetQuery = @"
+                INSERT INTO Bets (UserId, MatchId, BetOnTeam, BetAmount, TeamA, TeamB) 
+                VALUES (@userId, @matchId, @betOnTeam, @betAmount, @teamA, @teamB);";
+            using (var command = new MySqlCommand(insertBetQuery, connection))
+            {
+                command.Parameters.AddWithValue("@userId", userId);
+                command.Parameters.AddWithValue("@matchId", matchId);
+                command.Parameters.AddWithValue("@betOnTeam", betOnTeam);
+                command.Parameters.AddWithValue("@betAmount", betAmount);
+                command.Parameters.AddWithValue("@teamA", teamA);
+                command.Parameters.AddWithValue("@teamB", teamB);
+                command.ExecuteNonQuery();
+            }
+
+            string updateBalanceQuery = "UPDATE Users SET Balance = Balance - @betAmount WHERE Id = @userId;";
+            using (var updateCommand = new MySqlCommand(updateBalanceQuery, connection))
+            {
+                updateCommand.Parameters.AddWithValue("@betAmount", betAmount);
+                updateCommand.Parameters.AddWithValue("@userId", userId);
+                updateCommand.ExecuteNonQuery();
+            }
+        }
+    }
 
     public static void BekijkWeddenschappen(int userId)
     {
@@ -128,7 +202,7 @@ public class BetManager
 
                         // Step 2: Fetch match results from the API
                         var httpClient = new HttpClient();
-                        var apiResponse = httpClient.GetStringAsync("http://127.0.0.1/C3-Schoolvoetbal/matches_api.php").Result; //test
+                        var apiResponse = httpClient.GetStringAsync("http://127.0.0.1/C3-Schoolvoetbal/matches_api.php").Result;
 
                         if (string.IsNullOrWhiteSpace(apiResponse))
                         {
@@ -200,37 +274,6 @@ public class BetManager
         }
     }
 
-
-
-
-    public static List<Bet> GetUserBets(int userId)
-    {
-        var bets = new List<Bet>();
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-            string query = "SELECT BetOnTeam, BetAmount, TeamA, TeamB FROM Bets WHERE UserId = @userId;";
-            using (var command = new MySqlCommand(query, connection))
-            {
-                command.Parameters.AddWithValue("@userId", userId);
-                using (var reader = command.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        bets.Add(new Bet
-                        {
-                            TeamA = reader.GetString("TeamA"),
-                            TeamB = reader.GetString("TeamB"),
-                            BetOnTeam = reader.GetString("BetOnTeam"),
-                            BetAmount = reader.GetDecimal("BetAmount")
-                        });
-                    }
-                }
-            }
-        }
-        return bets;
-    }
-
     public static decimal GetUserBalance(int userId)
     {
         using (var connection = new MySqlConnection(connectionString))
@@ -241,120 +284,6 @@ public class BetManager
             {
                 command.Parameters.AddWithValue("@userId", userId);
                 return Convert.ToDecimal(command.ExecuteScalar());
-            }
-        }
-    }
-
-    public static void PlaatsWeddenschap(int userId)
-    {
-        Console.Clear();
-        var wedstrijden = GetAvailableMatches();
-
-        if (wedstrijden.Count == 0)
-        {
-            Console.WriteLine("Er zijn geen beschikbare wedstrijden om op te wedden.");
-            Console.ReadKey();
-            return;
-        }
-
-        Console.WriteLine("Beschikbare wedstrijden:");
-        for (int i = 0; i < wedstrijden.Count; i++)
-        {
-            Console.WriteLine($"{i + 1}: {wedstrijden[i].TeamA} vs {wedstrijden[i].TeamB}");
-        }
-
-        Console.Write("Kies het nummer van de wedstrijd: ");
-        int matchChoice;
-        if (!int.TryParse(Console.ReadLine(), out matchChoice) || matchChoice < 1 || matchChoice > wedstrijden.Count)
-        {
-            Console.WriteLine("Ongeldige keuze.");
-            Console.ReadKey();
-            return;
-        }
-
-        var geselecteerdeWedstrijd = wedstrijden[matchChoice - 1];
-
-        Console.WriteLine($"Je hebt gekozen voor: {geselecteerdeWedstrijd.TeamA} vs {geselecteerdeWedstrijd.TeamB}");
-        Console.Write("Op welk team wil je wedden? ");
-        string betOnTeam = Console.ReadLine().Trim().ToUpper();
-
-        if (betOnTeam != geselecteerdeWedstrijd.TeamA.ToUpper() && betOnTeam != geselecteerdeWedstrijd.TeamB.ToUpper())
-        {
-            Console.WriteLine($"Ongeldige keuze. Je kunt alleen op {geselecteerdeWedstrijd.TeamA} of {geselecteerdeWedstrijd.TeamB} wedden.");
-            Console.ReadKey();
-            return;
-        }
-
-        Console.Write("Inzet bedrag in 4S-dollars: ");
-        decimal betAmount;
-        if (!decimal.TryParse(Console.ReadLine(), out betAmount) || betAmount <= 0)
-        {
-            Console.WriteLine("Ongeldig bedrag.");
-            Console.ReadKey();
-            return;
-        }
-
-        decimal currentBalance = GetUserBalance(userId);
-        if (currentBalance < betAmount)
-        {
-            Console.WriteLine("Je hebt niet genoeg saldo voor deze weddenschap.");
-            Console.ReadKey();
-            return;
-        }
-
-        // Convert GameId from string to int
-        int matchId = int.Parse(geselecteerdeWedstrijd.GameId);
-
-        // Now call the method with correct types
-        PlaatsWeddenschapInDatabase(userId, matchId, betOnTeam, betAmount, geselecteerdeWedstrijd.TeamA, geselecteerdeWedstrijd.TeamB);
-
-        Console.WriteLine("Weddenschap succesvol geplaatst!");
-        Console.ReadKey();
-    }
-
-
-    private static string GetTeamNameById(string teamId)
-    {
-        // Placeholder logic to map teamId to team name
-        // Replace this with actual logic to retrieve team names based on their IDs
-        var teams = new Dictionary<string, string>
-    {
-        { "1", "Team A" },
-        { "3", "Team B" },
-        { "4", "Team C" },
-        { "6", "Team D" },
-        { "7", "Team E" }
-    };
-        return teams.ContainsKey(teamId) ? teams[teamId] : "Unknown Team";
-    }
-
-
-    public static void PlaatsWeddenschapInDatabase(int userId, int matchId, string betOnTeam, decimal betAmount, string teamA, string teamB)
-    {
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-
-            string insertBetQuery = @"
-                INSERT INTO Bets (UserId, MatchId, BetOnTeam, BetAmount, TeamA, TeamB) 
-                VALUES (@userId, @matchId, @betOnTeam, @betAmount, @teamA, @teamB);";
-            using (var command = new MySqlCommand(insertBetQuery, connection))
-            {
-                command.Parameters.AddWithValue("@userId", userId);
-                command.Parameters.AddWithValue("@matchId", matchId);
-                command.Parameters.AddWithValue("@betOnTeam", betOnTeam);
-                command.Parameters.AddWithValue("@betAmount", betAmount);
-                command.Parameters.AddWithValue("@teamA", teamA);
-                command.Parameters.AddWithValue("@teamB", teamB);
-                command.ExecuteNonQuery();
-            }
-
-            string updateBalanceQuery = "UPDATE Users SET Balance = Balance - @betAmount WHERE Id = @userId;";
-            using (var updateCommand = new MySqlCommand(updateBalanceQuery, connection))
-            {
-                updateCommand.Parameters.AddWithValue("@betAmount", betAmount);
-                updateCommand.Parameters.AddWithValue("@userId", userId);
-                updateCommand.ExecuteNonQuery();
             }
         }
     }
@@ -422,32 +351,6 @@ public class BetManager
         }
     }
 
-    public static List<Match> GetAvailableMatches()
-    {
-        var matches = new List<Match>();
-        using (var connection = new MySqlConnection(connectionString))
-        {
-            connection.Open();
-            string query = "SELECT Id, TeamA, TeamB FROM Matches WHERE Result IS NULL;";
-            using (var command = new MySqlCommand(query, connection))
-            {
-                using (var reader = command.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        matches.Add(new Match
-                        {
-                            Id = reader.GetInt32("Id"),
-                            TeamA = reader.GetString("TeamA"),
-                            TeamB = reader.GetString("TeamB")
-                        });
-                    }
-                }
-            }
-        }
-        return matches;
-    }
-
     public static void AdminLogin()
     {
         Console.Clear();
@@ -469,7 +372,7 @@ public class BetManager
         }
     }
 
-    public static void AdminPanel()
+    public static async Task AdminPanel()
     {
         while (true)
         {
@@ -483,13 +386,13 @@ public class BetManager
             switch (keuze)
             {
                 case "1":
-                    ManipuleerWeddenschappen();
+                    await ManipuleerWeddenschappen();
                     break;
                 case "2":
                     Console.WriteLine("Je bent uitgelogd als admin.");
                     return;
                 case "3":
-                    FetchMatchesFromAPI();
+                    await FetchMatchesFromAPI();
                     break;
                 default:
                     Console.WriteLine("Ongeldige keuze.");
@@ -498,9 +401,9 @@ public class BetManager
         }
     }
 
-    public static void ManipuleerWeddenschappen()
+    public static async Task ManipuleerWeddenschappen()
     {
-        var wedstrijden = GetAvailableMatches();
+        var wedstrijden = await FetchMatchesFromAPI();
         if (wedstrijden.Count == 0)
         {
             Console.WriteLine("Er zijn geen beschikbare wedstrijden om te manipuleren.");
@@ -515,8 +418,7 @@ public class BetManager
         }
 
         Console.Write("Kies het nummer van de wedstrijd die je wilt manipuleren: ");
-        int matchChoice;
-        if (!int.TryParse(Console.ReadLine(), out matchChoice) || matchChoice < 1 || matchChoice > wedstrijden.Count)
+        if (!int.TryParse(Console.ReadLine(), out int matchChoice) || matchChoice < 1 || matchChoice > wedstrijden.Count)
         {
             Console.WriteLine("Ongeldige keuze.");
             Console.ReadKey();
@@ -526,8 +428,7 @@ public class BetManager
         var selectedMatch = wedstrijden[matchChoice - 1];
         Console.WriteLine($"Je hebt gekozen voor: {selectedMatch.TeamA} vs {selectedMatch.TeamB}");
         Console.Write("Kies de winnaar (1 voor team A, 2 voor team B): ");
-        int winnerChoice;
-        if (!int.TryParse(Console.ReadLine(), out winnerChoice) || winnerChoice < 1 || winnerChoice > 2)
+        if (!int.TryParse(Console.ReadLine(), out int winnerChoice) || winnerChoice < 1 || winnerChoice > 2)
         {
             Console.WriteLine("Ongeldige keuze.");
             Console.ReadKey();
