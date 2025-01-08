@@ -1,4 +1,4 @@
-﻿using MySql.Data.MySqlClient;
+using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
@@ -31,7 +31,7 @@ public class BetManager
                     BekijkWeddenschappen(userId);
                     break;
                 case "3":
-                    Console.WriteLine($"Je saldo is: €{GetUserBalance(userId):F2}");
+                    Console.WriteLine($"Je saldo is: �{GetUserBalance(userId):F2}");
                     Console.ReadKey();
                     break;
                 case "4":
@@ -51,7 +51,7 @@ public class BetManager
     public static async Task FetchMatchesFromAPI()
     {
         Console.Clear();
-        string apiUrl = "http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php";
+        string apiUrl = "http://127.0.0.1/C3-Schoolvoetbal/matches_api.php";
 
         using (HttpClient client = new HttpClient())
         {
@@ -166,7 +166,7 @@ public class BetManager
                                     if (scores.Length == 2 && int.TryParse(scores[0], out int team1Score) && int.TryParse(scores[1], out int team2Score))
                                     {
                                         var winningTeam = team1Score > team2Score ? bet.TeamA : (team1Score < team2Score ? bet.TeamB : "Gelijkspel");
-                                        resultMessage = winningTeam == bet.BetOnTeam ? "Gewonnen ✅" : "Verloren ❌";
+                                        resultMessage = winningTeam == bet.BetOnTeam ? "Gewonnen ?" : "Verloren ?";
                                     }
                                     else
                                     {
@@ -180,7 +180,7 @@ public class BetManager
                             }
 
                             Console.WriteLine($"- Beschrijving: {bet.Description}");
-                            Console.WriteLine($"  Wedbedrag: €{bet.Amount}");
+                            Console.WriteLine($"  Wedbedrag: �{bet.Amount}");
                             Console.WriteLine($"  Gekozen team: {bet.BetOnTeam}");
                             Console.WriteLine($"  Uitslag: {resultMessage}\n");
                         }
@@ -245,10 +245,12 @@ public class BetManager
         }
     }
 
-    public static void PlaatsWeddenschap(int userId)
+
+    public static async Task PlaatsWeddenschap(int userId)
     {
         Console.Clear();
-        var wedstrijden = GetAvailableMatches();
+
+        var wedstrijden = await GetMatchesFromApi();
 
         if (wedstrijden.Count == 0)
         {
@@ -260,7 +262,9 @@ public class BetManager
         Console.WriteLine("Beschikbare wedstrijden:");
         for (int i = 0; i < wedstrijden.Count; i++)
         {
-            Console.WriteLine($"{i + 1}: {wedstrijden[i].TeamA} vs {wedstrijden[i].TeamB}");
+            var team1 = GetTeamNameById(wedstrijden[i].Team1Id);
+            var team2 = GetTeamNameById(wedstrijden[i].Team2Id);
+            Console.WriteLine($"{i + 1}: {team1} vs {team2}");
         }
 
         Console.Write("Kies het nummer van de wedstrijd: ");
@@ -273,14 +277,16 @@ public class BetManager
         }
 
         var geselecteerdeWedstrijd = wedstrijden[matchChoice - 1];
+        var selectedTeam1 = GetTeamNameById(geselecteerdeWedstrijd.Team1Id);
+        var selectedTeam2 = GetTeamNameById(geselecteerdeWedstrijd.Team2Id);
 
-        Console.WriteLine($"Je hebt gekozen voor: {geselecteerdeWedstrijd.TeamA} vs {geselecteerdeWedstrijd.TeamB}");
+        Console.WriteLine($"Je hebt gekozen voor: {selectedTeam1} vs {selectedTeam2}");
         Console.Write("Op welk team wil je wedden? ");
         string betOnTeam = Console.ReadLine().Trim().ToUpper();
 
-        if (betOnTeam != geselecteerdeWedstrijd.TeamA.ToUpper() && betOnTeam != geselecteerdeWedstrijd.TeamB.ToUpper())
+        if (betOnTeam != selectedTeam1.ToUpper() && betOnTeam != selectedTeam2.ToUpper())
         {
-            Console.WriteLine($"Ongeldige keuze. Je kunt alleen op {geselecteerdeWedstrijd.TeamA} of {geselecteerdeWedstrijd.TeamB} wedden.");
+            Console.WriteLine($"Ongeldige keuze. Je kunt alleen op {selectedTeam1} of {selectedTeam2} wedden.");
             Console.ReadKey();
             return;
         }
@@ -302,16 +308,19 @@ public class BetManager
             return;
         }
 
-        // Convert GameId from string to int
-        int matchId = int.Parse(geselecteerdeWedstrijd.GameId);
-
-        // Now call the method with correct types
-        PlaatsWeddenschapInDatabase(userId, matchId, betOnTeam, betAmount, geselecteerdeWedstrijd.TeamA, geselecteerdeWedstrijd.TeamB);
-
+        PlaatsWeddenschapInDatabase(userId, geselecteerdeWedstrijd.GameId, betOnTeam, betAmount, selectedTeam1, selectedTeam2);
         Console.WriteLine("Weddenschap succesvol geplaatst!");
         Console.ReadKey();
     }
 
+    private static async Task<List<Match>> GetMatchesFromApi()
+    {
+        using (var client = new HttpClient())
+        {
+            var response = await client.GetStringAsync("http://127.0.0.1/C3-Schoolvoetbal/matches_api.php");
+            return JsonSerializer.Deserialize<List<Match>>(response);
+        }
+    }
 
     private static string GetTeamNameById(string teamId)
     {
@@ -327,6 +336,12 @@ public class BetManager
     };
         return teams.ContainsKey(teamId) ? teams[teamId] : "Unknown Team";
     }
+
+
+
+
+
+
 
 
     public static void PlaatsWeddenschapInDatabase(int userId, int matchId, string betOnTeam, decimal betAmount, string teamA, string teamB)
@@ -399,7 +414,7 @@ public class BetManager
                         {
                             decimal winnings = betAmount * 2;
                             UpdateUserBalance(userId, winnings);
-                            Console.WriteLine($"Gebruiker {userId} heeft gewonnen! Winst: €{winnings:F2}");
+                            Console.WriteLine($"Gebruiker {userId} heeft gewonnen! Winst: �{winnings:F2}");
                         }
                     }
                 }
