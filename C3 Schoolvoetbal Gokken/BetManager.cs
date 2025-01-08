@@ -48,67 +48,160 @@ public class BetManager
 
 
 
-public static async Task FetchMatchesFromAPI()
-{
-    Console.Clear();
-    string apiUrl = "http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php";
+    public static async Task FetchMatchesFromAPI()
+    {
+        Console.Clear();
+        string apiUrl = "http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php";
 
-    using (HttpClient client = new HttpClient())
+        using (HttpClient client = new HttpClient())
+        {
+            try
+            {
+                Console.WriteLine("Bezig met ophalen van gegevens van de API...");
+
+                HttpResponseMessage response = await client.GetAsync(apiUrl);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    var matches = JsonSerializer.Deserialize<List<Match>>(jsonResponse);
+
+                    Console.WriteLine("\nBeschikbare wedstrijden:");
+                    foreach (var match in matches)
+                    {
+                        Console.WriteLine($"Wedstrijd: {match.TeamA} vs {match.TeamB}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Fout bij ophalen van gegevens: {response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Er is een fout opgetreden: {ex.Message}");
+            }
+        }
+
+        Console.WriteLine("\nDruk op een toets om door te gaan...");
+        Console.ReadKey();
+    }
+
+
+
+    public static void BekijkWeddenschappen(int userId)
     {
         try
         {
-            Console.WriteLine("Bezig met ophalen van gegevens van de API...");
-
-            HttpResponseMessage response = await client.GetAsync(apiUrl);
-
-            if (response.IsSuccessStatusCode)
+            using (var connection = new MySqlConnection(connectionString))
             {
-                string jsonResponse = await response.Content.ReadAsStringAsync();
-                var matches = JsonSerializer.Deserialize<List<Match>>(jsonResponse);
+                connection.Open();
 
-                Console.WriteLine("\nBeschikbare wedstrijden:");
-                foreach (var match in matches)
+                // Step 1: Fetch user's bets from the database
+                var query = "SELECT b.Id, b.BetDescription, b.BetAmount, b.BetOnTeam, b.HasWon, b.MatchId, m.TeamA, m.TeamB " +
+                            "FROM bets b " +
+                            "JOIN matches m ON b.MatchId = m.Id " +
+                            "WHERE b.UserId = @UserId";
+                using (var command = new MySqlCommand(query, connection))
                 {
-                    Console.WriteLine($"Wedstrijd: {match.TeamA} vs {match.TeamB}");
+                    command.Parameters.AddWithValue("@UserId", userId);
+
+                    using (var reader = command.ExecuteReader())
+                    {
+                        var bets = new List<(int BetId, string Description, decimal Amount, string BetOnTeam, bool? HasWon, int MatchId, string TeamA, string TeamB)>();
+
+                        while (reader.Read())
+                        {
+                            bets.Add((
+                                reader.GetInt32("Id"),
+                                reader.IsDBNull(reader.GetOrdinal("BetDescription")) ? "Geen beschrijving" : reader.GetString("BetDescription"),
+                                reader.IsDBNull(reader.GetOrdinal("BetAmount")) ? 0 : reader.GetDecimal("BetAmount"),
+                                reader.IsDBNull(reader.GetOrdinal("BetOnTeam")) ? "Geen team" : reader.GetString("BetOnTeam"),
+                                reader.IsDBNull(reader.GetOrdinal("HasWon")) ? (bool?)null : reader.GetBoolean("HasWon"),
+                                reader.IsDBNull(reader.GetOrdinal("MatchId")) ? -1 : reader.GetInt32("MatchId"),
+                                reader.IsDBNull(reader.GetOrdinal("TeamA")) ? "Onbekend" : reader.GetString("TeamA"),
+                                reader.IsDBNull(reader.GetOrdinal("TeamB")) ? "Onbekend" : reader.GetString("TeamB")
+                            ));
+                        }
+
+                        reader.Close();
+
+                        // Step 2: Fetch match results from the API
+                        var httpClient = new HttpClient();
+                        var apiResponse = httpClient.GetStringAsync("http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php").Result;
+
+                        if (string.IsNullOrWhiteSpace(apiResponse))
+                        {
+                            Console.WriteLine("De API heeft geen resultaten teruggestuurd.");
+                            return;
+                        }
+
+                        // Parse the API JSON response
+                        var apiResults = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(apiResponse);
+
+                        if (apiResults == null)
+                        {
+                            Console.WriteLine("Geen geldige resultaten ontvangen van de API.");
+                            return;
+                        }
+
+                        // Step 3: Display bets and whether they've been won or lost
+                        Console.WriteLine("Uw weddenschappen:");
+                        foreach (var bet in bets)
+                        {
+                            var matchResult = apiResults.FirstOrDefault(m => m.game_id != null && (int)m.game_id == bet.MatchId);
+                            string resultMessage;
+
+                            if (matchResult != null)
+                            {
+                                // Parse uitslag to determine the winning team
+                                string uitslag = matchResult.uitslag;
+                                if (string.IsNullOrWhiteSpace(uitslag))
+                                {
+                                    resultMessage = "Nog geen resultaat beschikbaar";
+                                }
+                                else
+                                {
+                                    var scores = uitslag.Split('-');
+                                    if (scores.Length == 2 && int.TryParse(scores[0], out int team1Score) && int.TryParse(scores[1], out int team2Score))
+                                    {
+                                        var winningTeam = team1Score > team2Score ? bet.TeamA : (team1Score < team2Score ? bet.TeamB : "Gelijkspel");
+                                        resultMessage = winningTeam == bet.BetOnTeam ? "Gewonnen ✅" : "Verloren ❌";
+                                    }
+                                    else
+                                    {
+                                        resultMessage = "Ongeldige uitslag";
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                resultMessage = "Nog geen resultaat beschikbaar";
+                            }
+
+                            Console.WriteLine($"- Beschrijving: {bet.Description}");
+                            Console.WriteLine($"  Wedbedrag: €{bet.Amount}");
+                            Console.WriteLine($"  Gekozen team: {bet.BetOnTeam}");
+                            Console.WriteLine($"  Uitslag: {resultMessage}\n");
+                        }
+                    }
                 }
             }
-            else
-            {
-                Console.WriteLine($"Fout bij ophalen van gegevens: {response.StatusCode}");
-            }
+
+            Console.WriteLine("Druk op Enter om terug te keren naar het menu.");
+            Console.ReadLine();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Er is een fout opgetreden: {ex.Message}");
+            Console.WriteLine("Er is een fout opgetreden:");
+            Console.WriteLine(ex.Message);
+            Console.WriteLine("Druk op Enter om terug te keren naar het menu.");
+            Console.ReadLine();
         }
     }
 
-    Console.WriteLine("\nDruk op een toets om door te gaan...");
-    Console.ReadKey();
-}
 
 
-
-public static void BekijkWeddenschappen(int userId)
-    {
-        Console.Clear();
-        Console.WriteLine("Je geplaatste weddenschappen:");
-
-        var placedBets = GetUserBets(userId);
-        if (placedBets.Count == 0)
-        {
-            Console.WriteLine("Je hebt geen weddenschappen geplaatst.");
-            Console.ReadKey();
-            return;
-        }
-
-        foreach (var bet in placedBets)
-        {
-            Console.WriteLine($"Wedstrijd: {bet.TeamA} vs {bet.TeamB} - Je wedde op: {bet.BetOnTeam} - Inzet: {bet.BetAmount} 4S-dollars");
-        }
-
-        Console.ReadKey();
-    }
 
     public static List<Bet> GetUserBets(int userId)
     {
