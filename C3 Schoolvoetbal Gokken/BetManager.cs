@@ -128,7 +128,7 @@ public class BetManager
 
                         // Step 2: Fetch match results from the API
                         var httpClient = new HttpClient();
-                        var apiResponse = httpClient.GetStringAsync("http://127.0.0.1:8000/C3-Schoolvoetbal/matches_api.php").Result;
+                        var apiResponse = httpClient.GetStringAsync("http://127.0.0.1/C3-Schoolvoetbal/matches_api.php").Result; //test
 
                         if (string.IsNullOrWhiteSpace(apiResponse))
                         {
